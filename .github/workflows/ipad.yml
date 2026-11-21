@@ -49,5 +49,8 @@ jobs:
         with:
           path: www
 
+      - name: Laisser GitHub enregistrer le paquet
+        run: sleep 20
+
       - id: deploy
         uses: actions/deploy-pages@v5
