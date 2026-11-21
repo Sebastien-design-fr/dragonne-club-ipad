@@ -433,6 +433,8 @@ dialog.wide{width:min(1000px,calc(100vw - 24px))}
 .filerow{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
 .filerow > div:first-child{display:flex;flex-direction:column;gap:2px;flex:1;min-width:220px}
 .filerow .acts{margin:0}
+.allcloud{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;background:var(--accent-soft);border-radius:12px;padding:12px 14px}
+.allcloud > div{display:flex;flex-direction:column;gap:2px;flex:1;min-width:220px}
 .ioshint{display:flex;flex-direction:column;gap:4px;background:var(--resin-soft);border-radius:14px;padding:12px 16px;margin-bottom:14px}
 .ioshint svg{width:18px;height:18px;vertical-align:-3px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .bonprev{width:100%;max-width:760px;margin:6px auto 0;background:#fff;border:1px solid var(--line);box-shadow:0 2px 10px rgba(20,18,40,.12)}
@@ -1629,7 +1631,8 @@ function renderReleves(){
   const r = {mode:S.settings.margeMode, val:S.settings.margeVal};
   const v = S.settings.vendeur;
   $("#main").innerHTML = `
-  <div class="head"><div><h1>Remboursements ${esc(CLUB())}</h1><p>Le club encaisse au prix club et rembourse le prix Dragonne Créa. Chaque encaissement ne figure que sur un seul relevé.</p></div></div>
+  <div class="head"><div><h1>Remboursements ${esc(CLUB())}</h1><p>Le club encaisse au prix club et rembourse le prix Dragonne Créa. Chaque encaissement ne figure que sur un seul relevé.</p></div>
+    ${S.releves.length ? `<div class="acts"><button class="btn ghost" id="relAll">Enregistrer tous les relevés (iCloud)</button></div>` : ""}</div>
   <section class="panel next">
     <div class="nexthead"><h2>Prochain relevé</h2>
       <div class="fgrid range"><label class="f">Du<input type="date" id="relDu" value="${du}"></label><label class="f">Au<input type="date" id="relAu" value="${au}"></label></div></div>
@@ -1655,7 +1658,7 @@ function renderReleves(){
       <div style="min-width:0"><b class="num">${esc(rel.num)}</b> <span class="muted">· ${dmy(rel.date)} · encaissements du ${dmy(rel.du)} au ${dmy(rel.au)}</span>
         <div class="num">${rel.rows.length} encaissement${rel.rows.length>1?"s":""} · ${rel.part < 0 ? "à reverser au club" : "à rembourser"} <b>${eur(Math.abs(rel.part))}</b></div></div>
       <span class="pill ${rel.statut === "rembourse" ? "prete" : "a_faire"}">${rel.statut === "rembourse" ? `Remboursé le ${dmy(rel.rembourseLe)}` : "En attente"}</span>
-      <div class="acts"><button class="btn small ghost" data-rsend="${rel.id}">Renvoyer le PDF</button>
+      <div class="acts"><button class="btn small ghost" data-rsend="${rel.id}">PDF (iCloud, mail…)</button>
         ${rel.statut === "rembourse" ? `<button class="btn small ghost" data-rundo="${rel.id}">Pas encore remboursé</button>` : `<button class="btn small ok" data-rpaid="${rel.id}">Marquer remboursé</button>`}<button class="btn small danger" data-rdel="${rel.id}">Supprimer</button></div>
     </div>`).join("")}</div>` : `<p class="muted" style="margin:0">Aucun relevé pour l'instant.</p>`}
   </section>
@@ -1683,6 +1686,7 @@ function renderReleves(){
   bindF("#vNom", x => v.nom = x || "Dragonne Créa"); bindF("#vContact", x => v.contact = x); bindF("#vAdr", x => v.adresse = x); bindF("#vSiret", x => v.siret = x);
   bindF("#cNom", x => S.settings.club = x || "GTO/VDB"); bindF("#cAdr", x => S.settings.clubAdresse = x);
   $("#main").querySelectorAll("[data-rsend]").forEach(b => b.onclick = () => shareReleve(releveOf(b.dataset.rsend)));
+  const ra = $("#relAll"); if(ra) ra.onclick = shareAllReleves;
   $("#main").querySelectorAll("[data-rpaid]").forEach(b => b.onclick = async () => {
     const rel = releveOf(b.dataset.rpaid);
     if(!(await ask(`Relevé ${rel.num} remboursé ?`, rel.part < 0 ? `Dragonne Créa a reversé ${eur(-rel.part)} au club.` : `Le club a versé ${eur(rel.part)} à Dragonne Créa.`, "Oui, remboursé"))) return;
@@ -2221,12 +2225,43 @@ async function shareJournal(du, au, cn){
     await saveBinary(`Journal${tag}_${du}${du === au ? "" : "_" + au}.pdf`, bin, "application/pdf");
   } catch(e){ console.error(e); toast("Le PDF n'a pas pu être créé"); }
 }
+const releveName = rel => `Releve-${rel.num}_${dayOf(rel.date)}-${CLUB().replace(/[^\w-]+/g, "")}.pdf`;
+const pdfBlob = bin => { const u8 = new Uint8Array(bin.length); for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], {type:"application/pdf"}); };
 async function shareReleve(rel){
   try {
     const bin = await relevePdf(rel);
-    const name = `Releve-${rel.num}-${CLUB().replace(/[^\w-]+/g, "")}.pdf`;
-    await saveBinary(name, bin, "application/pdf");
+    await saveBinary(releveName(rel), bin, "application/pdf");
   } catch(e){ toast("Le PDF n'a pas pu être créé"); }
+}
+/* Plusieurs fichiers d'un coup vers iCloud (iPad) ; sinon un par un */
+async function shareMany(list){
+  if(!list.length) return toast("Rien à enregistrer");
+  const sh = webShareFiles(list); if(sh) return sh;
+  for(const x of list) await webSave(x.name, x.blob);
+  return true;
+}
+async function shareAllReleves(){
+  try {
+    if(!S.releves.length) return toast("Aucun relevé pour l'instant");
+    const list = [];
+    for(const r of S.releves) list.push({name:releveName(r), blob:pdfBlob(await relevePdf(r))});
+    await shareMany(list);
+  } catch(e){ console.error(e); toast("Les PDF n'ont pas pu être créés"); }
+}
+/* Tout enregistrer : sauvegarde complète, bilan et journal du jour, ventes, catalogue et relevés, datés */
+async function shareEverything(du, au, cn){
+  try {
+    const t = todayISO(), j = o => new Blob([JSON.stringify(o)], {type:"application/json"});
+    const list = [
+      {name:`Sauvegarde-complete-Dragonne-Club_${t}.json`, blob:j({app:"dragonne-club", version:2, date:new Date().toISOString(), settings:S.settings, articles:S.articles, orders:S.orders, releves:S.releves})},
+      {name:`Bilan_${du}${du === au ? "" : "_au_" + au}.pdf`, blob:pdfBlob(await journalPdf(du, au, cn))},
+      {name:`Ventes-Dragonne-Club_${t}.json`, blob:j({app:"dragonne-club", type:"ventes", version:1, date:new Date().toISOString(), orders:S.orders, releves:S.releves})},
+      {name:`Catalogue-Dragonne-Club_${t}.json`, blob:j({app:"dragonne-club", type:"catalogue", version:1, date:new Date().toISOString(), articles:S.articles, reglages:{club:S.settings.club, margeMode:S.settings.margeMode, margeVal:S.settings.margeVal, arrondi:S.settings.arrondi}})}];
+    if(du !== au || cn !== "tous") list.splice(2, 0, {name:`Journal_${au}.pdf`, blob:pdfBlob(await journalPdf(au, au, "tous"))});
+    for(const r of S.releves) list.push({name:releveName(r), blob:pdfBlob(await relevePdf(r))});
+    const ok = await shareMany(list);
+    if(ok){ S.settings.lastBackup = new Date().toISOString(); await saveSettings(); toast("Tout est enregistré"); if(S.view === "bilan") renderBilan(); }
+  } catch(e){ console.error(e); toast("Les fichiers n'ont pas pu être créés"); }
 }
 async function saveBinary(name, bin, type){
   if(IS_APP){
@@ -2294,9 +2329,15 @@ function renderBilan(){
     <div class="acts"><button class="btn primary" id="exCsv">Télécharger les ventes (CSV)</button></div>
   </section>
   <section class="panel"><h2>Fichiers iCloud</h2>
-    <p class="muted" style="margin:0">Chaque fichier porte la date du jour. Touchez <b>Partager</b> puis <b>Enregistrer dans Fichiers</b> &gt; iCloud Drive &gt; Dragonne Club.</p>
+    <p class="muted" style="margin:0">Chaque fichier porte sa date. Touchez <b>Partager</b> puis <b>Enregistrer dans Fichiers</b> &gt; iCloud Drive &gt; Dragonne Club.</p>
+    <div class="allcloud"><div><b>Tout enregistrer dans iCloud</b><span class="muted small">En une fois : sauvegarde complète, bilan de la période, journal, ventes, catalogue et relevés. Idéal en fin de journée de vente.</span></div>
+      <button class="btn primary" id="fAll">Tout enregistrer</button></div>
     <div class="filerow"><div><b>Bilan de la période</b><span class="muted small">${oneDay ? `Journée du ${dmy(du)}` : `Du ${dmy(du)} au ${dmy(au)}`} · encaissements, ventes par produit, précommandes et bons de commande (PDF)</span></div>
       <div class="acts"><button class="btn primary" id="fBilan" ${pays.length || top.length ? "" : "disabled"}>Enregistrer le bilan</button></div></div>
+    <div class="filerow"><div><b>Journal des encaissements</b><span class="muted small">Journée du ${dmy(au)} · avec aperçu avant l'enregistrement (PDF)</span></div>
+      <div class="acts"><button class="btn" id="fJour">Voir et enregistrer</button></div></div>
+    <div class="filerow"><div><b>Remboursements du club</b><span class="muted small">${S.releves.length ? `${S.releves.length} relevé${S.releves.length > 1 ? "s" : ""}, chacun dans son PDF daté` : "Aucun relevé pour l'instant"}</span></div>
+      <div class="acts"><button class="btn" id="fRel" ${S.releves.length ? "" : "disabled"}>Enregistrer les relevés</button></div></div>
     <div class="filerow"><div><b>Chiffres de ventes</b><span class="muted small">Toutes les ventes, commandes et relevés. L'import ajoute les ventes d'un autre appareil sans créer de doublon.</span></div>
       <div class="acts"><button class="btn" id="fVOut">Exporter</button><button class="btn ghost" id="fVIn">Importer</button></div></div>
     <div class="filerow"><div><b>Catalogue</b><span class="muted small">${S.articles.length} articles avec photos, prix et stocks.</span></div>
@@ -2320,6 +2361,9 @@ function renderBilan(){
   $("#bkOut").onclick = backup;
   $("#bkIn").onclick = () => $("#jsonIn").click();
   $("#fBilan").onclick = $("#fBilan2").onclick = () => shareBilan(du, au, cn);
+  $("#fJour").onclick = () => openJournal(au, cn);
+  $("#fRel").onclick = shareAllReleves;
+  $("#fAll").onclick = () => shareEverything(du, au, cn);
   $("#fVOut").onclick = exportVentes; $("#fVIn").onclick = () => pickFile(importVentes);
   $("#fCOut").onclick = exportCatalogue; $("#fCIn").onclick = () => pickFile(importCatalogue);
   $("#stPct").onchange = e => { S.settings.acomptePct = Math.min(100, Math.max(0, parseInt(e.target.value)||0)); saveSettings(); toast("Réglage enregistré"); };
@@ -2353,15 +2397,18 @@ const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && windo
 /* Dans l'appli Android : le fichier est créé puis proposé via le menu Partager (Drive, mail, WhatsApp…) */
 /* Version web (iPad, iPhone) : le fichier passe par le menu Partager (Enregistrer dans Fichiers, Mail, AirDrop, Imprimer…).
    Safari n'autorise le partage que sur un toucher : on affiche donc un bouton une fois le fichier prêt. */
-function webShare(name, blob){
-  let file; try { file = new File([blob], name, {type:blob.type}); } catch(e){ return null; }
-  if(!(navigator.canShare && navigator.share && navigator.canShare({files:[file]}))) return null;
+function webShare(name, blob){ return webShareFiles([{name, blob}]); }
+function webShareFiles(list){
+  let files; try { files = list.map(x => new File([x.blob], x.name, {type:x.blob.type})); } catch(e){ return null; }
+  if(!(navigator.canShare && navigator.share && navigator.canShare({files}))) return null;
+  const n = files.length;
   return new Promise(res => {
-    openDlg(`<header><h2>Fichier prêt</h2></header><div class="body"><p style="margin:0"><b>${esc(name)}</b></p>
-      <p class="muted" style="margin:0">Touchez « Partager » puis choisissez <b>Enregistrer dans Fichiers</b>, Mail, AirDrop ou Imprimer.</p></div>
+    openDlg(`<header><h2>${n > 1 ? `${n} fichiers prêts` : "Fichier prêt"}</h2></header><div class="body">
+      <ul style="margin:0;padding-left:18px">${files.map(f => `<li><b>${esc(f.name)}</b></li>`).join("")}</ul>
+      <p class="muted" style="margin:0">Touchez « Partager » puis <b>Enregistrer dans Fichiers</b> &gt; iCloud Drive &gt; Dragonne Club pour ${n > 1 ? "les" : "le"} garder dans iCloud. Mail, AirDrop et Imprimer sont aussi proposés.</p></div>
       <footer><button class="btn ghost" id="wsNo" type="button">Fermer</button><button class="btn primary" id="wsGo" type="button">Partager</button></footer>`);
     $("#wsNo").onclick = () => { closeDlg(); res(false); };
-    $("#wsGo").onclick = () => { navigator.share({files:[file], title:name}).then(() => { closeDlg(); res(true); })
+    $("#wsGo").onclick = () => { navigator.share({files, title:n > 1 ? "Dragonne Club" : files[0].name}).then(() => { closeDlg(); res(true); })
       .catch(err => { if(err && err.name === "AbortError") return; closeDlg(); res(false); toast("Le partage n'a pas fonctionné"); }); };
   });
 }
