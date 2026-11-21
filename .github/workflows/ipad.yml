@@ -1,0 +1,53 @@
+name: Publier la version iPad (web)
+
+# Met en ligne l'appli sur GitHub Pages à chaque modification : sur iPad, on l'ouvre dans Safari
+# puis « Partager > Sur l'écran d'accueil ». L'APK Android n'est pas concerné.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Polices
+        run: |
+          npm install --no-audit --no-fund --no-save @fontsource/atkinson-hyperlegible @fontsource/bricolage-grotesque
+          mkdir -p www/fonts
+          for f in atkinson-hyperlegible/files/atkinson-hyperlegible-latin-400-normal.woff2 \
+                   atkinson-hyperlegible/files/atkinson-hyperlegible-latin-700-normal.woff2 \
+                   bricolage-grotesque/files/bricolage-grotesque-latin-600-normal.woff2 \
+                   bricolage-grotesque/files/bricolage-grotesque-latin-800-normal.woff2; do
+            cp "node_modules/@fontsource/$f" www/fonts/ || echo "::warning::Police absente : $f"
+          done
+
+      - name: Numéro de version du cache hors ligne
+        run: sed -i "s/dragonne-club-v2/dragonne-club-web-${{ github.run_number }}/" www/sw.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
