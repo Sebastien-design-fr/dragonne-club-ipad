@@ -1624,7 +1624,7 @@ const relTotals = rows => { const t = r2(rows.reduce((s,r) => s + r.montant, 0))
 function renderReleves(){
   const all = pendingClub();
   const first = all.length ? dayOf(all[0].p.date) : todayISO();
-  const du = S.relDu || first, au = S.relAu;
+  const du = S.relDu || todayISO(), au = S.relAu;
   const inRange = pendingClub(du, au);
   const items = inRange.filter(x => !S.relExcl.has(x.p.id)), rows = releveRows(items), t = relTotals(rows);
   const before = pendingClub(null, addDays(du, -1)).length, after = pendingClub(addDays(au, 1), null).length;
@@ -1650,7 +1650,7 @@ function renderReleves(){
       <div class="stat"><small>Marge du club</small><b class="num">${eur(t.marge)}</b></div>
       <div class="stat key"><small>${t.part < 0 ? "À reverser au club" : "À rembourser"}</small><b class="num">${eur(Math.abs(t.part))}</b></div>
     </div>` : `<p class="muted" style="margin:0">Aucun encaissement ${esc(CLUB())} à reprendre sur cette période.</p>`}
-    ${before || after ? `<p class="muted small" style="margin:0">${[before ? `${before} encaissement${before>1?"s":""} plus ancien${before>1?"s":""}` : "", after ? `${after} plus récent${after>1?"s":""}` : ""].filter(Boolean).join(" et ")} en dehors de la période, non repris.</p>` : ""}
+    ${before || after ? `<p class="muted small" style="margin:0">${[before ? `${before} encaissement${before>1?"s":""} plus ancien${before>1?"s":""}` : "", after ? `${after} plus récent${after>1?"s":""}` : ""].filter(Boolean).join(" et ")} en dehors de la période, non repris.${before ? ` <button class="btn small ghost" id="relFirst">Reprendre depuis le ${dmy(first)}</button>` : ""}</p>` : ""}
     ${rows.length ? `<div class="acts"><button class="btn primary" id="relPrev">Voir le relevé et l'envoyer</button></div>` : ""}
   </section>
   <section class="panel"><h2>Relevés envoyés</h2>
@@ -1677,6 +1677,7 @@ function renderReleves(){
   </section>`;
   $("#relDu").onchange = e => { S.relDu = e.target.value || null; renderReleves(); };
   $("#relAu").onchange = e => { S.relAu = e.target.value || todayISO(); renderReleves(); };
+  const rf = $("#relFirst"); if(rf) rf.onclick = () => { S.relDu = first; renderReleves(); };
   $("#main").querySelectorAll(".rck").forEach(c => c.onchange = () => { c.checked ? S.relExcl.delete(c.dataset.pid) : S.relExcl.add(c.dataset.pid); renderReleves(); });
   $("#main").querySelectorAll("[data-odel]").forEach(b => b.onclick = () => deleteOrders([b.dataset.odel]));
   $("#main").querySelectorAll("[data-bon]").forEach(b => b.onclick = () => shareBons(S.orders.find(o => o.id === b.dataset.bon)));
@@ -2564,6 +2565,13 @@ function ask(title, msg, okLabel, danger){
 }
 
 /* ---------- Hors ligne ---------- */
+/* L'appli peut rester ouverte plusieurs jours sur l'iPad : au changement de jour, les filtres de dates reviennent à aujourd'hui */
+let dayRef = todayISO();
+function resetDates(){ const t = todayISO(); if(t === dayRef) return; dayRef = t;
+  S.bilanDu = S.bilanAu = t; S.relDu = null; S.relAu = t;
+  if(S.view === "bilan" || S.view === "releves") render(); }
+document.addEventListener("visibilitychange", () => { if(!document.hidden) resetDates(); });
+window.addEventListener("pageshow", resetDates);
 if(!IS_APP && "serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 boot().catch(err => { console.error(err); $("#main").innerHTML = `<div class="panel"><h2>Démarrage impossible</h2><p>Le stockage de la tablette est inaccessible (navigation privée ?). Ouvrez l'appli dans Chrome (Android) ou Safari (iPad) en mode normal.</p></div>`; });
 </script>
